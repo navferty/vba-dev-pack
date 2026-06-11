@@ -17,6 +17,9 @@ using System.Text;
 
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
+var config = WorkbookPackageHelpers.ReadConfig(Environment.CurrentDirectory);
+var nativeEncoding = config.GetCodepageEncoding();
+
 var workbookPath = args.Length > 0
     ? Path.GetFullPath(args[0])
     : Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "Sample.xlsm"));
@@ -86,7 +89,7 @@ try
     workbook = ((dynamic)workbooks!).Open(workbookPath, false, true);
     WorkbookPackageHelpers.EnsureVbProjectAccessible(((dynamic)workbook!).VBProject);
 
-    ExportVbaComponentsToTemp((dynamic)workbook!, tempExportDir);
+    ExportVbaComponentsToTemp((dynamic)workbook!, tempExportDir, nativeEncoding);
 
     var compare = BuildComparison(sourceDir, tempExportDir, customUiPath, tempCustomUiPath);
     var html = BuildHtmlReport(compare, workbookPath, sourceDir, tempExportDir);
@@ -146,7 +149,7 @@ finally
     ForceComCleanup();
 }
 
-static void ExportVbaComponentsToTemp(dynamic workbook, string exportDir)
+static void ExportVbaComponentsToTemp(dynamic workbook, string exportDir, Encoding nativeEncoding)
 {
     dynamic vbProject = workbook.VBProject;
     dynamic components = vbProject.VBComponents;
@@ -194,13 +197,12 @@ static void ExportVbaComponentsToTemp(dynamic workbook, string exportDir)
             }
         }
 
-        var cp1251 = Encoding.GetEncoding(1251);
         var utf8NoBom = new UTF8Encoding(false);
 
         foreach (var path in exportedText)
         {
             var bytes = File.ReadAllBytes(path);
-            var text = cp1251.GetString(bytes);
+            var text = nativeEncoding.GetString(bytes);
             File.WriteAllText(path, text, utf8NoBom);
         }
     }

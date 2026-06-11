@@ -14,6 +14,9 @@ using System.Text;
 
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
+var config = WorkbookPackageHelpers.ReadConfig(Environment.CurrentDirectory);
+var nativeEncoding = config.GetCodepageEncoding();
+
 var workbookPath = args.Length > 0
     ? Path.GetFullPath(args[0])
     : Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "Sample.xlsm"));
@@ -142,13 +145,12 @@ try
         }
     }
 
-    var cp1251 = Encoding.GetEncoding(1251);
     var utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     foreach (var filePath in exportedTextFiles)
     {
         var bytes = File.ReadAllBytes(filePath);
-        var text = cp1251.GetString(bytes);
+        var text = nativeEncoding.GetString(bytes);
         File.WriteAllText(filePath, text, utf8NoBom);
         Console.WriteLine($"Converted to UTF-8: {Path.GetFileName(filePath)}");
     }

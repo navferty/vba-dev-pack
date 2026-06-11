@@ -1,0 +1,62 @@
+name: Notify on Push to Master
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  send-email:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Bump patch version
+        id: version
+        run: |
+          current=$(cat VERSION)
+          major=$(echo "$current" | cut -d. -f1)
+          minor=$(echo "$current" | cut -d. -f2)
+          patch=$(echo "$current" | cut -d. -f3)
+          new_patch=$((patch + 1))
+          new_version="${major}.${minor}.${new_patch}"
+          echo "$new_version" > VERSION
+          echo "version=$new_version" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: bump version to ${{ steps.version.outputs.version }} [skip ci]"
+          git push
+
+      - name: Prepare versioned attachment
+        run: |
+          cp Sample.xlsm "Sample_v${{ steps.version.outputs.version }}.xlsm"
+
+      - name: Send email notification
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ vars.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "[${{ github.repository }}] New commits pushed to master (v${{ steps.version.outputs.version }})"
+          to: ${{ vars.NOTIFY_EMAIL }}
+          from: ${{ vars.GMAIL_USER }}
+          attachments: Sample_v${{ steps.version.outputs.version }}.xlsm
+          body: |
+            New changes have been pushed to the master branch.
+
+            Repository: ${{ github.repository }}
+            Version:    v${{ steps.version.outputs.version }}
+            Pushed by:  ${{ github.actor }}
+            Commit:     ${{ github.sha }}
+            Message:    ${{ github.event.head_commit.message || '(no message)' }}
+
+            View the changes: ${{ github.event.compare }}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui"
+          onLoad="OnRibbonLoad">
+    <ribbon>
+        <tabs>
+            <tab id="customTab" label="Sample" keytip="XR">
+                <group id="Tools" label="Counters">
+                    <button id="IncrementCounterBtn" imageMso="HeaderFooterPreviousSection" keytip="I"
+                        label="Increment Counter"
+                        onAction="IncrementCounter" screentip="Increment the counter" size="large" />
+                </group>
+            </tab>
+        </tabs>
+    </ribbon>
+</customUI>

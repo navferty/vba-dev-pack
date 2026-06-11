@@ -1,0 +1,370 @@
+#!/usr/bin/env -S dotnet --
+#:sdk Microsoft.NET.Sdk
+#:property TargetFramework=net10.0-windows
+#:property PublishAot=false
+#:property PublishTrimmed=false
+#:property IsAotCompatible=false
+#:property EnableTrimAnalyzer=false
+#:property EnableAotAnalyzer=false
+#:property BuiltInComInteropSupport=true
+#:include WorkbookPackageHelpers.cs
+
+using System.Runtime.InteropServices;
+using System.Text;
+
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
+var workbookPath = args.Length > 0
+    ? Path.GetFullPath(args[0])
+    : Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "Sample.xlsm"));
+
+var sourceDir = args.Length > 1
+    ? Path.GetFullPath(args[1])
+    : Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "source"));
+
+var customUiPath = args.Length > 2
+    ? Path.GetFullPath(args[2])
+    : Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "customUI", "customUI.xml"));
+
+if (!File.Exists(workbookPath))
+{
+    Console.Error.WriteLine($"Workbook not found: {workbookPath}");
+    Environment.Exit(1);
+}
+
+if (!Directory.Exists(sourceDir))
+{
+    Console.Error.WriteLine($"Source directory not found: {sourceDir}");
+    Environment.Exit(1);
+}
+
+try
+{
+    WorkbookPackageHelpers.EnsureWorkbookClosed(workbookPath);
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine(ex.Message);
+    Environment.Exit(1);
+}
+
+var backupRoot = WorkbookPackageHelpers.CreateTempBackupDirectory("import");
+var workbookBackupPath = WorkbookPackageHelpers.BackupFile(
+    workbookPath,
+    backupRoot,
+    Path.Combine("workbook", Path.GetFileName(workbookPath)));
+Console.WriteLine($"Backup (workbook): {workbookBackupPath}");
+Console.WriteLine($"Backup root: {backupRoot}");
+
+if (File.Exists(customUiPath))
+{
+    WorkbookPackageHelpers.ImportCustomUi(workbookPath, customUiPath);
+    Console.WriteLine($"Imported customUI from: {customUiPath}");
+}
+else
+{
+    Console.WriteLine($"Skipped customUI import, file not found: {customUiPath}");
+}
+
+var moduleFiles = Directory
+    .EnumerateFiles(sourceDir, "*.*", SearchOption.TopDirectoryOnly)
+    .Where(path => IsSupportedImportExtension(Path.GetExtension(path)))
+    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+    .ToList();
+
+if (moduleFiles.Count == 0)
+{
+    Console.WriteLine($"No importable files found in: {sourceDir}");
+    Environment.Exit(0);
+}
+
+object? excel = null;
+object? workbooks = null;
+object? workbook = null;
+object? vbProject = null;
+object? components = null;
+var tempDir = Path.Combine(Path.GetTempPath(), "vba-import-" + Guid.NewGuid().ToString("N"));
+
+try
+{
+    Directory.CreateDirectory(tempDir);
+
+    var excelType = Type.GetTypeFromProgID("Excel.Application");
+    if (excelType is null)
+    {
+        throw new InvalidOperationException("Excel COM type is not available. Is Microsoft Excel installed?");
+    }
+
+    excel = Activator.CreateInstance(excelType);
+    ((dynamic)excel!).Visible = false;
+    ((dynamic)excel!).DisplayAlerts = false;
+
+    workbooks = ((dynamic)excel!).Workbooks;
+    workbook = ((dynamic)workbooks!).Open(workbookPath, false, false);
+    vbProject = ((dynamic)workbook!).VBProject;
+    WorkbookPackageHelpers.EnsureVbProjectAccessible(vbProject);
+    components = ((dynamic)vbProject!).VBComponents;
+
+    foreach (var sourcePath in moduleFiles)
+    {
+        var ext = Path.GetExtension(sourcePath).ToLowerInvariant();
+        var baseName = Path.GetFileNameWithoutExtension(sourcePath);
+
+        if (ext == ".cls" && TryGetComponentByName((dynamic)components!, baseName, out dynamic existingByName))
+        {
+            try
+            {
+                if ((int)existingByName.Type == 100)
+                {
+                    UpdateDocumentModule(existingByName, sourcePath);
+                    Console.WriteLine($"Updated document module: {baseName}");
+                    continue;
+                }
+            }
+            finally
+            {
+                Marshal.FinalReleaseComObject(existingByName);
+            }
+        }
+
+        ImportAsRegularComponent((dynamic)components!, sourcePath, tempDir);
+    }
+
+    ((dynamic)workbook!).Save();
+    Console.WriteLine($"Done. Imported modules from: {sourceDir}");
+}
+catch (COMException ex)
+{
+    Console.Error.WriteLine(BuildFriendlyComException(ex, "importing VBA modules").Message);
+    Environment.Exit(2);
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine(ex.Message);
+    Environment.Exit(3);
+}
+finally
+{
+    SafeFinalReleaseComObject(components);
+    SafeFinalReleaseComObject(vbProject);
+
+    if (workbook is not null)
+    {
+        try
+        {
+            ((dynamic)workbook).Close(true);
+        }
+        catch
+        {
+            // No-op.
+        }
+
+        SafeFinalReleaseComObject(workbook);
+    }
+
+    SafeFinalReleaseComObject(workbooks);
+
+    if (excel is not null)
+    {
+        try
+        {
+            ((dynamic)excel).Quit();
+        }
+        catch
+        {
+            // No-op.
+        }
+
+        SafeFinalReleaseComObject(excel);
+    }
+
+    ForceComCleanup();
+
+    try
+    {
+        if (Directory.Exists(tempDir))
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+    catch
+    {
+        // No-op.
+    }
+}
+
+static void SafeFinalReleaseComObject(object? comObject)
+{
+    if (comObject is not null && Marshal.IsComObject(comObject))
+    {
+        Marshal.FinalReleaseComObject(comObject);
+    }
+}
+
+static void ForceComCleanup()
+{
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+}
+
+static Exception BuildFriendlyComException(COMException ex, string action)
+{
+    var hexHresult = $"0x{(uint)ex.ErrorCode:X8}";
+    var msg = ex.Message ?? string.Empty;
+    if (ex.ErrorCode == unchecked((int)0x800A03EC))
+    {
+        return new InvalidOperationException(
+            "Excel denied access to VBProject. Enable: Excel -> File -> Options -> Trust Center -> Trust Center Settings -> Macro Settings -> Trust access to the VBA project object model. " +
+            $"HRESULT: {hexHresult}",
+            ex);
+    }
+
+    return new InvalidOperationException($"COM error while {action}. HRESULT: {hexHresult}. Details: {msg}", ex);
+}
+
+static bool IsSupportedImportExtension(string ext)
+{
+    return ext.Equals(".bas", StringComparison.OrdinalIgnoreCase)
+        || ext.Equals(".cls", StringComparison.OrdinalIgnoreCase)
+        || ext.Equals(".frm", StringComparison.OrdinalIgnoreCase);
+}
+
+static void ImportAsRegularComponent(dynamic components, string sourcePath, string tempDir)
+{
+    var ext = Path.GetExtension(sourcePath).ToLowerInvariant();
+    var moduleName = Path.GetFileNameWithoutExtension(sourcePath);
+    var expectedType = ext switch
+    {
+        ".bas" => 1,
+        ".cls" => 2,
+        ".frm" => 3,
+        _ => throw new InvalidOperationException($"Unsupported import extension: {ext}")
+    };
+
+    if (TryGetComponentByName(components, moduleName, out dynamic existing))
+    {
+        try
+        {
+            var existingType = (int)existing.Type;
+            if (existingType == 100)
+            {
+                throw new InvalidOperationException(
+                    $"Component '{moduleName}' is a document module in workbook and cannot be replaced by file '{Path.GetFileName(sourcePath)}'.");
+            }
+
+            if (existingType != expectedType)
+            {
+                throw new InvalidOperationException(
+                    $"Component type mismatch for '{moduleName}'. Existing type={existingType}, file extension={ext}.");
+            }
+
+            components.Remove(existing);
+            Console.WriteLine($"Removed existing: {moduleName}");
+        }
+        finally
+        {
+            Marshal.FinalReleaseComObject(existing);
+        }
+    }
+
+    var cp1251Path = CreateCp1251ImportCopy(sourcePath, tempDir);
+    dynamic imported = components.Import(cp1251Path);
+    try
+    {
+        Console.WriteLine($"Imported: {Path.GetFileName(sourcePath)} as {imported.Name}");
+    }
+    finally
+    {
+        Marshal.FinalReleaseComObject(imported);
+    }
+}
+
+static string CreateCp1251ImportCopy(string sourcePath, string tempDir)
+{
+    var ext = Path.GetExtension(sourcePath).ToLowerInvariant();
+    var fileName = Path.GetFileName(sourcePath);
+    var cp1251Path = Path.Combine(tempDir, fileName);
+
+    var utf8NoBom = new UTF8Encoding(false, true);
+    var cp1251 = Encoding.GetEncoding(1251);
+
+    var text = File.ReadAllText(sourcePath, utf8NoBom);
+    File.WriteAllText(cp1251Path, text, cp1251);
+
+    if (ext == ".frm")
+    {
+        var sourceFrx = Path.Combine(Path.GetDirectoryName(sourcePath)!, Path.GetFileNameWithoutExtension(sourcePath) + ".frx");
+        if (File.Exists(sourceFrx))
+        {
+            var targetFrx = Path.Combine(tempDir, Path.GetFileName(sourceFrx));
+            File.Copy(sourceFrx, targetFrx, true);
+        }
+    }
+
+    return cp1251Path;
+}
+
+static void UpdateDocumentModule(dynamic component, string sourcePath)
+{
+    var utf8NoBom = new UTF8Encoding(false, true);
+    var fullText = File.ReadAllText(sourcePath, utf8NoBom);
+    var codeOnly = ExtractDocumentCode(fullText);
+
+    dynamic codeModule = component.CodeModule;
+    try
+    {
+        var lines = (int)codeModule.CountOfLines;
+        if (lines > 0)
+        {
+            codeModule.DeleteLines(1, lines);
+        }
+
+        if (!string.IsNullOrWhiteSpace(codeOnly))
+        {
+            codeModule.AddFromString(codeOnly);
+        }
+    }
+    finally
+    {
+        Marshal.FinalReleaseComObject(codeModule);
+    }
+}
+
+static string ExtractDocumentCode(string text)
+{
+    var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+    var lines = normalized.Split('\n');
+
+    var lastAttributeIndex = -1;
+    for (var i = 0; i < lines.Length; i++)
+    {
+        var trimmed = lines[i].TrimStart();
+        if (trimmed.StartsWith("Attribute ", StringComparison.OrdinalIgnoreCase))
+        {
+            lastAttributeIndex = i;
+        }
+    }
+
+    if (lastAttributeIndex >= 0 && lastAttributeIndex + 1 < lines.Length)
+    {
+        return string.Join(Environment.NewLine, lines[(lastAttributeIndex + 1)..]).TrimStart('\r', '\n');
+    }
+
+    return normalized;
+}
+
+static bool TryGetComponentByName(dynamic components, string name, out dynamic component)
+{
+    component = null!;
+    try
+    {
+        component = components.Item(name);
+        return true;
+    }
+    catch
+    {
+        return false;
+    }
+}

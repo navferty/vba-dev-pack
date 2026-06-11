@@ -3,8 +3,28 @@ param(
 )
 
 $Path = Join-Path (Get-Location) "source"
+
+$codepage = 1251
+$configPath = Join-Path (Get-Location) "vba-dev-pack.json"
+if (Test-Path -LiteralPath $configPath) {
+    try {
+        $configJson = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        if ($null -ne $configJson.codepage) {
+            try {
+                $codepage = [int]$configJson.codepage
+            }
+            catch {
+                Write-Warning "Invalid codepage value '$($configJson.codepage)' in vba-dev-pack.json. Using default codepage $codepage."
+            }
+        }
+    }
+    catch {
+        Write-Warning "Could not read vba-dev-pack.json: $_. Using default codepage $codepage."
+    }
+}
+
 $sourceEncoding = New-Object System.Text.UTF8Encoding($false, $true)
-$targetEncoding = [System.Text.Encoding]::GetEncoding(1251)
+$targetEncoding = [System.Text.Encoding]::GetEncoding($codepage)
 $extensions = @('.txt', '.csv', '.md', '.bas', '.cls', '.frm', '.doccls', '.vbs', '.ps1')
 
 function Test-IsUtf8Encoded {
@@ -59,7 +79,7 @@ $filesToProcess | ForEach-Object {
     $bytes = [System.IO.File]::ReadAllBytes($filePath)
 
     if (-not (Test-IsUtf8Encoded -Bytes $bytes)) {
-        Write-Host "Skipped, already CP1251 or not valid UTF-8: $filePath"
+        Write-Host "Skipped, already native encoding or not valid UTF-8: $filePath"
         return
     }
 

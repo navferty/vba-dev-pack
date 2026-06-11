@@ -85,8 +85,8 @@ dotnet .\scripts\DiffVbaModules.cs
 ## How export/import behave
 
 - Export removes old module files in `source/` and writes fresh files.
-- Export and diff convert VBA text files from CP1251 to UTF-8 (no BOM) for Git.
-- Import converts UTF-8 repo files to CP1251 for Excel import.
+- Export and diff convert VBA text files from the configured codepage to UTF-8 (no BOM) for Git.
+- Import converts UTF-8 repo files to the configured codepage for Excel import.
 - Import updates document modules (`ThisWorkbook`, sheet classes) in place.
 - `customUI/customUI.xml` is exported/imported from workbook package part (`customUI.xml` or `customUI14.xml` when present).
 - Export/import create backups under `%TEMP%\vba-dev-pack-backups\...`.
@@ -97,10 +97,10 @@ dotnet .\scripts\DiffVbaModules.cs
 Convert all supported files in `source/`:
 
 ```powershell
-# CP1251 -> UTF-8
+# native codepage -> UTF-8
 .\scripts\ToUtf.ps1
 
-# UTF-8 -> CP1251
+# UTF-8 -> native codepage
 .\scripts\FromUtf.ps1
 ```
 
@@ -120,7 +120,17 @@ Convert selected files:
 - `scripts/ImportVbaModules.cs`
 - `scripts/DiffVbaModules.cs`
 
-4. Set GitHub workflow variables/secrets used by `.github/workflows/notify-email.yml`:
+4. Set the codepage for your project in `vba-dev-pack.json` (default: `1251`):
+
+```json
+{
+  "codepage": 1251
+}
+```
+
+The codepage is used when converting VBA text files between the native Excel encoding and UTF-8 during export, import, diff, and encoding helper operations. Set it to the Windows codepage that matches your locale (e.g. `1252` for Western European, `1251` for Cyrillic, `1250` for Central European).
+
+5. Set GitHub workflow variables/secrets used by `.github/workflows/notify-email.yml`:
 
 - Repository variable: `GMAIL_USER`
 - Repository variable: `NOTIFY_EMAIL`
@@ -134,8 +144,8 @@ gh variable set NOTIFY_EMAIL --body "team@company.com"
 gh secret set GMAIL_APP_PASSWORD --body "<gmail-app-password>"
 ```
 
-5. Update CI workbook naming in `.github/workflows/notify-email.yml` (copy/attachment step currently uses `Sample.xlsm`).
-6. Ensure your default branch matches workflow trigger (`master`) or update trigger branch.
+6. Update CI workbook naming in `.github/workflows/notify-email.yml` (copy/attachment step currently uses `Sample.xlsm`).
+7. Ensure your default branch matches workflow trigger (`master`) or update trigger branch.
 
 ## GitHub workflow behavior
 

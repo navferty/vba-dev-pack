@@ -14,6 +14,9 @@ using System.Text;
 
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
+var config = WorkbookPackageHelpers.ReadConfig(Environment.CurrentDirectory);
+var nativeEncoding = config.GetCodepageEncoding();
+
 var workbookPath = args.Length > 0
     ? Path.GetFullPath(args[0])
     : Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "Sample.xlsm"));
@@ -127,7 +130,7 @@ try
             }
         }
 
-        ImportAsRegularComponent((dynamic)components!, sourcePath, tempDir);
+        ImportAsRegularComponent((dynamic)components!, sourcePath, tempDir, nativeEncoding);
     }
 
     ((dynamic)workbook!).Save();
@@ -231,7 +234,7 @@ static bool IsSupportedImportExtension(string ext)
         || ext.Equals(".frm", StringComparison.OrdinalIgnoreCase);
 }
 
-static void ImportAsRegularComponent(dynamic components, string sourcePath, string tempDir)
+static void ImportAsRegularComponent(dynamic components, string sourcePath, string tempDir, Encoding nativeEncoding)
 {
     var ext = Path.GetExtension(sourcePath).ToLowerInvariant();
     var moduleName = Path.GetFileNameWithoutExtension(sourcePath);
@@ -269,8 +272,8 @@ static void ImportAsRegularComponent(dynamic components, string sourcePath, stri
         }
     }
 
-    var cp1251Path = CreateCp1251ImportCopy(sourcePath, tempDir);
-    dynamic imported = components.Import(cp1251Path);
+    var nativePath = CreateNativeEncodingImportCopy(sourcePath, tempDir, nativeEncoding);
+    dynamic imported = components.Import(nativePath);
     try
     {
         Console.WriteLine($"Imported: {Path.GetFileName(sourcePath)} as {imported.Name}");
@@ -281,17 +284,16 @@ static void ImportAsRegularComponent(dynamic components, string sourcePath, stri
     }
 }
 
-static string CreateCp1251ImportCopy(string sourcePath, string tempDir)
+static string CreateNativeEncodingImportCopy(string sourcePath, string tempDir, Encoding nativeEncoding)
 {
     var ext = Path.GetExtension(sourcePath).ToLowerInvariant();
     var fileName = Path.GetFileName(sourcePath);
-    var cp1251Path = Path.Combine(tempDir, fileName);
+    var nativePath = Path.Combine(tempDir, fileName);
 
     var utf8NoBom = new UTF8Encoding(false, true);
-    var cp1251 = Encoding.GetEncoding(1251);
 
     var text = File.ReadAllText(sourcePath, utf8NoBom);
-    File.WriteAllText(cp1251Path, text, cp1251);
+    File.WriteAllText(nativePath, text, nativeEncoding);
 
     if (ext == ".frm")
     {
@@ -303,7 +305,7 @@ static string CreateCp1251ImportCopy(string sourcePath, string tempDir)
         }
     }
 
-    return cp1251Path;
+    return nativePath;
 }
 
 static void UpdateDocumentModule(dynamic component, string sourcePath)

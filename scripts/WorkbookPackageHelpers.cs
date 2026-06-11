@@ -1,9 +1,33 @@
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 static class WorkbookPackageHelpers
 {
+    private const string ConfigFileName = "vba-dev-pack.json";
+
+    public static VbaDevPackConfig ReadConfig(string baseDir)
+    {
+        var configPath = Path.Combine(baseDir, ConfigFileName);
+        if (!File.Exists(configPath))
+        {
+            return new VbaDevPackConfig();
+        }
+
+        try
+        {
+            var json = File.ReadAllText(configPath, new UTF8Encoding(false));
+            return JsonSerializer.Deserialize<VbaDevPackConfig>(json) ?? new VbaDevPackConfig();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Warning: Could not read {ConfigFileName}: {ex.Message}. Using default codepage.");
+            return new VbaDevPackConfig();
+        }
+    }
+
     private static readonly string[] CustomUiCandidates =
     {
         "customUI/customUI.xml",
@@ -172,5 +196,26 @@ static class WorkbookPackageHelpers
         }
 
         return null;
+    }
+}
+
+sealed class VbaDevPackConfig
+{
+    [JsonPropertyName("codepage")]
+    public int Codepage { get; set; } = 1251;
+
+    public Encoding GetCodepageEncoding()
+    {
+        try
+        {
+            return Encoding.GetEncoding(Codepage);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"Codepage {Codepage} specified in vba-dev-pack.json is not supported. " +
+                "Use a valid Windows codepage number (e.g. 1251 for Cyrillic, 1252 for Western European, 1250 for Central European).",
+                ex);
+        }
     }
 }

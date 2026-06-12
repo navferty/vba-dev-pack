@@ -15,14 +15,14 @@ dotnet .\scripts\ExportVbaModules.cs
 dotnet .\scripts\ImportVbaModules.cs
 ```
 
-Always run diff before import/export to avoid accidentally overwriting newer changes.
+It is recommended to always run diff before import/export.
 
 ## Why use this template
 
-- Keep VBA modules and Ribbon XML as normal text files in Git.
-- Round-trip safely between workbook and repository with backup creation.
-- Get visual diff report between workbook state and repository state.
-- Automate patch version bump + email delivery of versioned XLSM via GitHub Actions.
+- Keep VBA modules and Ribbon XML as plain text in Git.
+- Safe workbook <-> repository round-trip with backups.
+- Visual HTML diff report before apply.
+- Optional version bump + email delivery via GitHub Actions.
 
 ## What is included
 
@@ -49,10 +49,10 @@ Always run diff before import/export to avoid accidentally overwriting newer cha
 
 `ExportVbaModules.cs`, `ImportVbaModules.cs`, and `DiffVbaModules.cs` use named arguments:
 
-- `--workbook`, `-w` - path to workbook (`.xlsm`), default from `vba-dev-pack.json` field `workbook`
-- `--source`, `-s` - path to source directory, default `./source`
-- `--custom-ui`, `-c` - path to customUI XML, default `./customUI/customUI.xml`
-- `--help`, `-h` - show script help
+- `--workbook`, `-w`: workbook path (`.xlsm`), default from `vba-dev-pack.json` (`workbook`)
+- `--source`, `-s`: source directory, default `./source`
+- `--custom-ui`, `-c`: customUI XML path, default `./customUI/customUI.xml`
+- `--help`, `-h`: show help
 
 Additional options:
 
@@ -93,12 +93,11 @@ dotnet .\scripts\DiffVbaModules.cs -- --direction import
 ## Daily development flow
 
 1. Pull latest changes.
-2. Run diff and decide authoritative side (workbook or repo) before any import/export.
-3. Import repo source into workbook only if repo should overwrite workbook.
-4. Edit VBA in Excel.
-5. Export workbook back to repo only if workbook should overwrite repo.
-6. Run diff report again before commit.
-7. Commit `source/`, `customUI/`, and workbook changes if needed.
+2. Run directional diff and choose source of truth.
+3. Run apply command (import or export).
+4. Review preflight report.
+5. Approve apply (`Enter` = yes by default).
+6. Run diff again before commit.
 
 Commands:
 
@@ -113,21 +112,44 @@ dotnet .\scripts\ExportVbaModules.cs
 dotnet .\scripts\DiffVbaModules.cs
 ```
 
+## Final sync UX
+
+1. Preview with direction:
+	- `dotnet .\scripts\DiffVbaModules.cs -- -d export`
+	- `dotnet .\scripts\DiffVbaModules.cs -- -d import`
+2. Run apply command:
+	- `dotnet .\scripts\ExportVbaModules.cs` or `dotnet .\scripts\ImportVbaModules.cs`
+3. Check preflight HTML report.
+4. Confirm prompt: `Approve diff? [Y]es / [n]o (default: yes)`.
+
+Apply flags:
+
+- `--force`: skip interactive confirmation
+- `--no-open-report`: do not auto-open report in browser
+
 ## How export/import behave
 
-- Export removes old module files in `source/` and writes fresh files.
-- Export and diff convert VBA text files from the configured codepage to UTF-8 (no BOM) for Git.
-- Import converts UTF-8 repo files to the configured codepage for Excel import.
+- Export rewrites VBA files in `source/`.
+- Export and diff convert VBA text to UTF-8 (no BOM).
+- Import converts UTF-8 back to configured native codepage.
 - Import updates document modules (`ThisWorkbook`, sheet classes) in place.
-- `customUI/customUI.xml` is exported/imported from workbook package part (`customUI.xml` or `customUI14.xml` when present).
-- Export/import create backups under `%TEMP%\vba-dev-pack-backups\...` by default.
-- You can override backup root in `vba-dev-pack.json` using `backupRoot`.
-- Backup root path is printed in script output (`Backup root: ...`) for recovery.
-- Before apply, import/export build a directional preflight diff report.
-- By default, command asks for confirmation: `Approve diff? [Y]es / [n]o`.
-- Default answer is `yes` (press Enter).
-- Use `--force` to skip interactive confirmation.
-- Use `--no-open-report` to avoid auto-opening report in browser.
+- `customUI/customUI.xml` is synced with workbook package part.
+- Apply commands create backups (default: `%TEMP%\vba-dev-pack-backups`).
+- Backup root is printed in output.
+
+## Exit codes
+
+Common:
+
+- `0`: success
+- `1`: invalid arguments/paths or pre-check failure
+- `2`: Excel COM/VBProject error
+- `3`: other runtime error
+
+Apply only (`ExportVbaModules.cs`, `ImportVbaModules.cs`):
+
+- `4`: cancelled by user
+- `5`: non-interactive mode without `--force`
 
 ## Encoding helper scripts
 
@@ -167,11 +189,11 @@ Encoding helper options:
 }
 ```
 
-The codepage is used when converting VBA text files between the native Excel encoding and UTF-8 during export, import, diff, and encoding helper operations. Set it to the Windows codepage that matches your locale (e.g. `1252` for Western European, `1251` for Cyrillic, `1250` for Central European).
+`codepage` controls VBA text conversion between native encoding and UTF-8.
 
-`workbook` is required unless you always pass `--workbook` explicitly.
+`workbook` is required unless you always pass `--workbook`.
 
-`backupRoot` is optional. If omitted, backups are created under `%TEMP%\vba-dev-pack-backups`.
+`backupRoot` is optional. Default is `%TEMP%\vba-dev-pack-backups`.
 
 4. Set GitHub workflow variables/secrets used by `.github/workflows/notify-email.yml`:
 
@@ -206,4 +228,11 @@ If your workbook is not `Sample.xlsm`, update the attachment step in workflow.
 - `Workbook is currently open or locked`: close workbook in Excel.
 - `Excel denied access to VBProject`: enable Trust Center VBA project access setting.
 - `Workbook not found` or `Source directory not found`: verify paths or pass explicit arguments.
-- 
+
+## Security and limitations
+
+- Windows + Excel Desktop only.
+- Requires VBA project access in Trust Center.
+- Uses Excel COM automation.
+- No atomic rollback.
+- Recovery is manual from backups.

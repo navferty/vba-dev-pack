@@ -54,6 +54,12 @@ Always run diff before import/export to avoid accidentally overwriting newer cha
 - `--custom-ui`, `-c` - path to customUI XML, default `./customUI/customUI.xml`
 - `--help`, `-h` - show script help
 
+Additional options:
+
+- `DiffVbaModules.cs`: `--direction`, `-d` (`export` | `import`), `--no-open-report`
+- `ExportVbaModules.cs`: `--force`, `--no-open-report`
+- `ImportVbaModules.cs`: `--force`, `--no-open-report`
+
 Example:
 
 ```powershell
@@ -69,6 +75,19 @@ Help examples:
 dotnet .\scripts\ExportVbaModules.cs -- --help
 dotnet .\scripts\ImportVbaModules.cs -- --help
 dotnet .\scripts\DiffVbaModules.cs -- --help
+```
+
+Direction examples:
+
+```powershell
+# Neutral comparison (default)
+dotnet .\scripts\DiffVbaModules.cs
+
+# Export-oriented preview (workbook -> repo)
+dotnet .\scripts\DiffVbaModules.cs -- --direction export
+
+# Import-oriented preview (repo -> workbook)
+dotnet .\scripts\DiffVbaModules.cs -- --direction import
 ```
 
 ## Daily development flow
@@ -104,6 +123,11 @@ dotnet .\scripts\DiffVbaModules.cs
 - Export/import create backups under `%TEMP%\vba-dev-pack-backups\...` by default.
 - You can override backup root in `vba-dev-pack.json` using `backupRoot`.
 - Backup root path is printed in script output (`Backup root: ...`) for recovery.
+- Before apply, import/export build a directional preflight diff report.
+- By default, command asks for confirmation: `Approve diff? [Y]es / [n]o`.
+- Default answer is `yes` (press Enter).
+- Use `--force` to skip interactive confirmation.
+- Use `--no-open-report` to avoid auto-opening report in browser.
 
 ## Encoding helper scripts
 

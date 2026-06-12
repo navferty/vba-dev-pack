@@ -17,6 +17,85 @@ static class WorkbookPackageHelpers
     public static ScriptPaths ParseScriptPaths(string[] args, VbaDevPackConfig config, string baseDir)
     {
         var options = ParseNamedArguments(args);
+        return ParseScriptPaths(options, config, baseDir);
+    }
+
+    public static DiffScriptOptions ParseDiffScriptOptions(string[] args, VbaDevPackConfig config, string baseDir)
+    {
+        var options = ParseNamedArguments(args, new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "help", "h", "no-open-report"
+        });
+
+        if (options.TryGetValue("error", out var parseError))
+        {
+            return DiffScriptOptions.FromError(parseError ?? "Invalid arguments.");
+        }
+
+        var showHelp = options.ContainsKey("help") || options.ContainsKey("h");
+        if (showHelp)
+        {
+            return DiffScriptOptions.HelpRequested();
+        }
+
+        var paths = ParseScriptPaths(options, config, baseDir);
+        if (!paths.IsValid)
+        {
+            return DiffScriptOptions.FromError(paths.Error ?? "Invalid path arguments.");
+        }
+
+        var direction = DiffDirection.Neutral;
+        if (TryGetOptionValue(options, "direction", "d", out var directionValue) && !string.IsNullOrWhiteSpace(directionValue))
+        {
+            if (directionValue.Equals("export", StringComparison.OrdinalIgnoreCase))
+            {
+                direction = DiffDirection.Export;
+            }
+            else if (directionValue.Equals("import", StringComparison.OrdinalIgnoreCase))
+            {
+                direction = DiffDirection.Import;
+            }
+            else
+            {
+                return DiffScriptOptions.FromError("Option '--direction' must be either 'export' or 'import'.");
+            }
+        }
+
+        var noOpenReport = options.ContainsKey("no-open-report");
+        return DiffScriptOptions.FromValues(paths, direction, noOpenReport);
+    }
+
+    public static ApplyScriptOptions ParseApplyScriptOptions(string[] args, VbaDevPackConfig config, string baseDir)
+    {
+        var options = ParseNamedArguments(args, new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "help", "h", "force", "no-open-report"
+        });
+
+        if (options.TryGetValue("error", out var parseError))
+        {
+            return ApplyScriptOptions.FromError(parseError ?? "Invalid arguments.");
+        }
+
+        var showHelp = options.ContainsKey("help") || options.ContainsKey("h");
+        if (showHelp)
+        {
+            return ApplyScriptOptions.HelpRequested();
+        }
+
+        var paths = ParseScriptPaths(options, config, baseDir);
+        if (!paths.IsValid)
+        {
+            return ApplyScriptOptions.FromError(paths.Error ?? "Invalid path arguments.");
+        }
+
+        var force = options.ContainsKey("force");
+        var noOpenReport = options.ContainsKey("no-open-report");
+        return ApplyScriptOptions.FromValues(paths, force, noOpenReport);
+    }
+
+    private static ScriptPaths ParseScriptPaths(Dictionary<string, string?> options, VbaDevPackConfig config, string baseDir)
+    {
         var showHelp = options.ContainsKey("help") || options.ContainsKey("h");
         if (showHelp)
         {
@@ -92,8 +171,13 @@ static class WorkbookPackageHelpers
         return EncodingScriptOptions.FromValues(Path.GetFullPath(sourceValue!), files);
     }
 
-    public static Dictionary<string, string?> ParseNamedArguments(string[] args)
+    public static Dictionary<string, string?> ParseNamedArguments(string[] args, HashSet<string>? valuelessOptions = null)
     {
+        valuelessOptions ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "help", "h"
+        };
+
         var result = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < args.Length; i++)
         {
@@ -111,7 +195,7 @@ static class WorkbookPackageHelpers
                 return result;
             }
 
-            if (key.Equals("help", StringComparison.OrdinalIgnoreCase) || key.Equals("h", StringComparison.OrdinalIgnoreCase))
+            if (valuelessOptions.Contains(key))
             {
                 result[key] = null;
                 continue;
@@ -149,6 +233,30 @@ Options:
 Example:
     dotnet .\\scripts\\{scriptName}.cs -- --workbook .\\Sample.xlsm --source .\\source --custom-ui .\\customUI\\customUI.xml
 """;
+    }
+
+    public static string BuildDiffHelp(VbaDevPackConfig config, string baseDir)
+    {
+        return BuildCommonPathsHelp("DiffVbaModules", "Builds HTML diff report comparing workbook export and repository source.", config, baseDir)
+            + "\nAdditional options:\n"
+            + "    --direction, -d      Report mode: export|import (default: neutral)\n"
+            + "    --no-open-report     Do not open HTML report automatically\n";
+    }
+
+    public static string BuildExportHelp(VbaDevPackConfig config, string baseDir)
+    {
+        return BuildCommonPathsHelp("ExportVbaModules", "Exports workbook VBA modules and custom UI to repository files.", config, baseDir)
+            + "\nAdditional options:\n"
+            + "    --force              Skip interactive diff confirmation\n"
+            + "    --no-open-report     Do not open HTML report automatically\n";
+    }
+
+    public static string BuildImportHelp(VbaDevPackConfig config, string baseDir)
+    {
+        return BuildCommonPathsHelp("ImportVbaModules", "Imports repository VBA modules and custom UI into workbook.", config, baseDir)
+            + "\nAdditional options:\n"
+            + "    --force              Skip interactive diff confirmation\n"
+            + "    --no-open-report     Do not open HTML report automatically\n";
     }
 
     public static string BuildEncodingHelp(string scriptName, string direction)
@@ -382,6 +490,30 @@ Examples:
         }
     }
 
+    public static bool EnsureApprovedOrExit(bool force)
+    {
+        if (force)
+        {
+            return true;
+        }
+
+        if (Console.IsInputRedirected)
+        {
+            Console.Error.WriteLine("Interactive confirmation is required. Re-run with --force in non-interactive mode.");
+            Environment.Exit(5);
+        }
+
+        Console.Write("Approve diff? [Y]es / [n]o (default: yes): ");
+        var input = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return true;
+        }
+
+        var normalized = input.Trim().ToLowerInvariant();
+        return normalized is "y" or "yes";
+    }
+
     private static string? ResolveDefaultWorkbookPath(VbaDevPackConfig config, string baseDir)
     {
         if (string.IsNullOrWhiteSpace(config.Workbook))
@@ -460,6 +592,52 @@ Examples:
 
         return null;
     }
+}
+
+sealed class DiffScriptOptions
+{
+    public bool ShowHelp { get; init; }
+    public bool IsValid { get; init; }
+    public string? Error { get; init; }
+    public ScriptPaths Paths { get; init; } = new();
+    public DiffDirection Direction { get; init; } = DiffDirection.Neutral;
+    public bool NoOpenReport { get; init; }
+
+    public static DiffScriptOptions HelpRequested() => new() { ShowHelp = true, IsValid = true };
+
+    public static DiffScriptOptions FromError(string error) => new() { IsValid = false, Error = error };
+
+    public static DiffScriptOptions FromValues(ScriptPaths paths, DiffDirection direction, bool noOpenReport) =>
+        new()
+        {
+            IsValid = true,
+            Paths = paths,
+            Direction = direction,
+            NoOpenReport = noOpenReport
+        };
+}
+
+sealed class ApplyScriptOptions
+{
+    public bool ShowHelp { get; init; }
+    public bool IsValid { get; init; }
+    public string? Error { get; init; }
+    public ScriptPaths Paths { get; init; } = new();
+    public bool Force { get; init; }
+    public bool NoOpenReport { get; init; }
+
+    public static ApplyScriptOptions HelpRequested() => new() { ShowHelp = true, IsValid = true };
+
+    public static ApplyScriptOptions FromError(string error) => new() { IsValid = false, Error = error };
+
+    public static ApplyScriptOptions FromValues(ScriptPaths paths, bool force, bool noOpenReport) =>
+        new()
+        {
+            IsValid = true,
+            Paths = paths,
+            Force = force,
+            NoOpenReport = noOpenReport
+        };
 }
 
 sealed class ScriptPaths

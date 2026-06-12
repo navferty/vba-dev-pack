@@ -8,33 +8,30 @@
 #:property EnableAotAnalyzer=false
 #:property BuiltInComInteropSupport=true
 #:include WorkbookPackageHelpers.cs
+#:include VbaDiffEngine.cs
 
 using System.Runtime.InteropServices;
 using System.Text;
 
 var config = WorkbookPackageHelpers.ReadConfig(Environment.CurrentDirectory);
-var parsedPaths = WorkbookPackageHelpers.ParseScriptPaths(args, config, Environment.CurrentDirectory);
-if (parsedPaths.ShowHelp)
+var options = WorkbookPackageHelpers.ParseApplyScriptOptions(args, config, Environment.CurrentDirectory);
+if (options.ShowHelp)
 {
-    Console.WriteLine(WorkbookPackageHelpers.BuildCommonPathsHelp(
-        "ExportVbaModules",
-        "Exports workbook VBA modules and custom UI to repository files.",
-        config,
-        Environment.CurrentDirectory));
+    Console.WriteLine(WorkbookPackageHelpers.BuildExportHelp(config, Environment.CurrentDirectory));
     return;
 }
 
-if (!parsedPaths.IsValid)
+if (!options.IsValid)
 {
-    Console.Error.WriteLine(parsedPaths.Error);
+    Console.Error.WriteLine(options.Error);
     Console.Error.WriteLine("Use --help to see available options.");
     Environment.Exit(1);
 }
 
 var nativeEncoding = WorkbookPackageHelpers.InitializeNativeEncoding(Environment.CurrentDirectory);
-var workbookPath = parsedPaths.WorkbookPath;
-var sourceDir = parsedPaths.SourceDir;
-var customUiPath = parsedPaths.CustomUiPath;
+var workbookPath = options.Paths.WorkbookPath;
+var sourceDir = options.Paths.SourceDir;
+var customUiPath = options.Paths.CustomUiPath;
 
 if (!File.Exists(workbookPath))
 {
@@ -50,6 +47,16 @@ catch (Exception ex)
 {
     Console.Error.WriteLine(ex.Message);
     Environment.Exit(1);
+}
+
+var preflightExportDir = Path.Combine(Path.GetTempPath(), "vba-export-preflight-" + Guid.NewGuid().ToString("N"));
+var preflightCustomUiPath = Path.Combine(preflightExportDir, "customUI.xml");
+var reportPath = Path.Combine(Path.GetTempPath(), $"vba-export-preflight-{DateTime.Now:yyyyMMdd-HHmmss}.html");
+
+if (!RunPreflight(workbookPath, sourceDir, customUiPath, nativeEncoding, preflightExportDir, preflightCustomUiPath, reportPath, options.NoOpenReport, options.Force))
+{
+    Console.WriteLine("Export cancelled.");
+    Environment.Exit(4);
 }
 
 Directory.CreateDirectory(sourceDir);
@@ -210,6 +217,117 @@ finally
     }
 
     WorkbookPackageHelpers.ForceComCleanup();
+}
+
+static bool RunPreflight(
+    string workbookPath,
+    string sourceDir,
+    string customUiPath,
+    Encoding nativeEncoding,
+    string tempExportDir,
+    string tempCustomUiPath,
+    string reportPath,
+    bool noOpenReport,
+    bool force)
+{
+    object? excel = null;
+    object? workbooks = null;
+    object? workbook = null;
+
+    try
+    {
+        Directory.CreateDirectory(tempExportDir);
+
+        _ = WorkbookPackageHelpers.TryExportCustomUi(workbookPath, tempCustomUiPath, out _);
+
+        var excelType = Type.GetTypeFromProgID("Excel.Application");
+        if (excelType is null)
+        {
+            throw new InvalidOperationException("Excel COM type is not available. Is Microsoft Excel installed?");
+        }
+
+        excel = Activator.CreateInstance(excelType);
+        ((dynamic)excel!).Visible = false;
+        ((dynamic)excel!).DisplayAlerts = false;
+
+        workbooks = ((dynamic)excel!).Workbooks;
+        workbook = ((dynamic)workbooks!).Open(workbookPath, false, true);
+        WorkbookPackageHelpers.EnsureVbProjectAccessible(((dynamic)workbook!).VBProject);
+
+        VbaDiffEngine.ExportWorkbookModulesToTemp((dynamic)workbook!, tempExportDir, nativeEncoding);
+
+        var compare = VbaDiffEngine.BuildComparison(sourceDir, tempExportDir, customUiPath, tempCustomUiPath, DiffDirection.Export);
+        var html = VbaDiffEngine.BuildHtmlReport(compare, workbookPath, sourceDir, tempExportDir, DiffDirection.Export);
+        File.WriteAllText(reportPath, html, new UTF8Encoding(false));
+
+        if (!noOpenReport)
+        {
+            _ = VbaDiffEngine.TryOpenReport(reportPath);
+        }
+
+        Console.WriteLine($"Preflight report path: {reportPath}");
+        Console.WriteLine(VbaDiffEngine.BuildConsoleSummary(compare, DiffDirection.Export));
+
+        return WorkbookPackageHelpers.EnsureApprovedOrExit(force);
+    }
+    catch (COMException ex)
+    {
+        Console.Error.WriteLine(WorkbookPackageHelpers.BuildFriendlyComException(ex, "preflight export diff").Message);
+        Environment.Exit(2);
+        return false;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        Environment.Exit(3);
+        return false;
+    }
+    finally
+    {
+        if (workbook is not null)
+        {
+            try
+            {
+                ((dynamic)workbook).Close(false);
+            }
+            catch
+            {
+                // No-op.
+            }
+
+            WorkbookPackageHelpers.SafeFinalReleaseComObject(workbook);
+        }
+
+        WorkbookPackageHelpers.SafeFinalReleaseComObject(workbooks);
+
+        if (excel is not null)
+        {
+            try
+            {
+                ((dynamic)excel).Quit();
+            }
+            catch
+            {
+                // No-op.
+            }
+
+            WorkbookPackageHelpers.SafeFinalReleaseComObject(excel);
+        }
+
+        WorkbookPackageHelpers.ForceComCleanup();
+
+        try
+        {
+            if (Directory.Exists(tempExportDir))
+            {
+                Directory.Delete(tempExportDir, true);
+            }
+        }
+        catch
+        {
+            // No-op.
+        }
+    }
 }
 
 static string? GetExtension(int componentType)

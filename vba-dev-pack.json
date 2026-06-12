@@ -1,3 +1,5 @@
 {
+  "workbook": "Sample.xlsm",
+  "backupRoot": "%TEMP%\\vba-dev-pack-backups",
   "codepage": 1251
 }

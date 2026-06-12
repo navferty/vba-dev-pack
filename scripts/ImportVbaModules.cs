@@ -12,22 +12,29 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-
 var config = WorkbookPackageHelpers.ReadConfig(Environment.CurrentDirectory);
-var nativeEncoding = config.GetCodepageEncoding();
+var parsedPaths = WorkbookPackageHelpers.ParseScriptPaths(args, config, Environment.CurrentDirectory);
+if (parsedPaths.ShowHelp)
+{
+    Console.WriteLine(WorkbookPackageHelpers.BuildCommonPathsHelp(
+        "ImportVbaModules",
+        "Imports repository VBA modules and custom UI into workbook.",
+        config,
+        Environment.CurrentDirectory));
+    return;
+}
 
-var workbookPath = args.Length > 0
-    ? Path.GetFullPath(args[0])
-    : Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "Sample.xlsm"));
+if (!parsedPaths.IsValid)
+{
+    Console.Error.WriteLine(parsedPaths.Error);
+    Console.Error.WriteLine("Use --help to see available options.");
+    Environment.Exit(1);
+}
 
-var sourceDir = args.Length > 1
-    ? Path.GetFullPath(args[1])
-    : Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "source"));
-
-var customUiPath = args.Length > 2
-    ? Path.GetFullPath(args[2])
-    : Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "customUI", "customUI.xml"));
+var nativeEncoding = WorkbookPackageHelpers.InitializeNativeEncoding(Environment.CurrentDirectory);
+var workbookPath = parsedPaths.WorkbookPath;
+var sourceDir = parsedPaths.SourceDir;
+var customUiPath = parsedPaths.CustomUiPath;
 
 if (!File.Exists(workbookPath))
 {
@@ -51,7 +58,7 @@ catch (Exception ex)
     Environment.Exit(1);
 }
 
-var backupRoot = WorkbookPackageHelpers.CreateTempBackupDirectory("import");
+var backupRoot = WorkbookPackageHelpers.CreateTempBackupDirectory("import", config, Environment.CurrentDirectory);
 var workbookBackupPath = WorkbookPackageHelpers.BackupFile(
     workbookPath,
     backupRoot,
@@ -138,7 +145,7 @@ try
 }
 catch (COMException ex)
 {
-    Console.Error.WriteLine(BuildFriendlyComException(ex, "importing VBA modules").Message);
+    Console.Error.WriteLine(WorkbookPackageHelpers.BuildFriendlyComException(ex, "importing VBA modules").Message);
     Environment.Exit(2);
 }
 catch (Exception ex)
@@ -148,8 +155,8 @@ catch (Exception ex)
 }
 finally
 {
-    SafeFinalReleaseComObject(components);
-    SafeFinalReleaseComObject(vbProject);
+    WorkbookPackageHelpers.SafeFinalReleaseComObject(components);
+    WorkbookPackageHelpers.SafeFinalReleaseComObject(vbProject);
 
     if (workbook is not null)
     {
@@ -162,10 +169,10 @@ finally
             // No-op.
         }
 
-        SafeFinalReleaseComObject(workbook);
+        WorkbookPackageHelpers.SafeFinalReleaseComObject(workbook);
     }
 
-    SafeFinalReleaseComObject(workbooks);
+    WorkbookPackageHelpers.SafeFinalReleaseComObject(workbooks);
 
     if (excel is not null)
     {
@@ -178,10 +185,10 @@ finally
             // No-op.
         }
 
-        SafeFinalReleaseComObject(excel);
+        WorkbookPackageHelpers.SafeFinalReleaseComObject(excel);
     }
 
-    ForceComCleanup();
+    WorkbookPackageHelpers.ForceComCleanup();
 
     try
     {
@@ -194,37 +201,6 @@ finally
     {
         // No-op.
     }
-}
-
-static void SafeFinalReleaseComObject(object? comObject)
-{
-    if (comObject is not null && Marshal.IsComObject(comObject))
-    {
-        Marshal.FinalReleaseComObject(comObject);
-    }
-}
-
-static void ForceComCleanup()
-{
-    GC.Collect();
-    GC.WaitForPendingFinalizers();
-    GC.Collect();
-    GC.WaitForPendingFinalizers();
-}
-
-static Exception BuildFriendlyComException(COMException ex, string action)
-{
-    var hexHresult = $"0x{(uint)ex.ErrorCode:X8}";
-    var msg = ex.Message ?? string.Empty;
-    if (ex.ErrorCode == unchecked((int)0x800A03EC))
-    {
-        return new InvalidOperationException(
-            "Excel denied access to VBProject. Enable: Excel -> File -> Options -> Trust Center -> Trust Center Settings -> Macro Settings -> Trust access to the VBA project object model. " +
-            $"HRESULT: {hexHresult}",
-            ex);
-    }
-
-    return new InvalidOperationException($"COM error while {action}. HRESULT: {hexHresult}. Details: {msg}", ex);
 }
 
 static bool IsSupportedImportExtension(string ext)

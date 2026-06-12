@@ -32,7 +32,7 @@ Always run diff before import/export to avoid accidentally overwriting newer cha
 - `scripts/ExportVbaModules.cs` - export workbook VBA/customUI to repository.
 - `scripts/ImportVbaModules.cs` - import repository VBA/customUI into workbook.
 - `scripts/DiffVbaModules.cs` - generate and open HTML diff report.
-- `scripts/ToUtf.ps1` / `scripts/FromUtf.ps1` - encoding helpers.
+- `scripts/ToUtf.cs` / `scripts/FromUtf.cs` - encoding helpers.
 - `.github/workflows/notify-email.yml` - version bump + Gmail notification flow.
 - `VERSION` - semantic version used by workflow (patch auto-increment).
 
@@ -45,18 +45,30 @@ Always run diff before import/export to avoid accidentally overwriting newer cha
 - Excel setting enabled:
 	- File -> Options -> Trust Center -> Trust Center Settings -> Macro Settings -> Trust access to the VBA project object model.
 
-## Script arguments and defaults
+## Script arguments
 
-All three C# scripts support the same positional arguments:
+`ExportVbaModules.cs`, `ImportVbaModules.cs`, and `DiffVbaModules.cs` use named arguments:
 
-1. `workbookPath` (default: `./Sample.xlsm`)
-2. `sourceDir` (default: `./source`)
-3. `customUiPath` (default: `./customUI/customUI.xml`)
+- `--workbook`, `-w` - path to workbook (`.xlsm`), default from `vba-dev-pack.json` field `workbook`
+- `--source`, `-s` - path to source directory, default `./source`
+- `--custom-ui`, `-c` - path to customUI XML, default `./customUI/customUI.xml`
+- `--help`, `-h` - show script help
 
 Example:
 
 ```powershell
-dotnet .\scripts\ExportVbaModules.cs .\Sample.xlsm .\source .\customUI\customUI.xml
+dotnet .\scripts\ExportVbaModules.cs
+
+# or override workbook explicitly
+dotnet .\scripts\ExportVbaModules.cs -- --workbook .\Sample.xlsm
+```
+
+Help examples:
+
+```powershell
+dotnet .\scripts\ExportVbaModules.cs -- --help
+dotnet .\scripts\ImportVbaModules.cs -- --help
+dotnet .\scripts\DiffVbaModules.cs -- --help
 ```
 
 ## Daily development flow
@@ -89,7 +101,8 @@ dotnet .\scripts\DiffVbaModules.cs
 - Import converts UTF-8 repo files to the configured codepage for Excel import.
 - Import updates document modules (`ThisWorkbook`, sheet classes) in place.
 - `customUI/customUI.xml` is exported/imported from workbook package part (`customUI.xml` or `customUI14.xml` when present).
-- Export/import create backups under `%TEMP%\vba-dev-pack-backups\...`.
+- Export/import create backups under `%TEMP%\vba-dev-pack-backups\...` by default.
+- You can override backup root in `vba-dev-pack.json` using `backupRoot`.
 - Backup root path is printed in script output (`Backup root: ...`) for recovery.
 
 ## Encoding helper scripts
@@ -98,39 +111,45 @@ Convert all supported files in `source/`:
 
 ```powershell
 # native codepage -> UTF-8
-.\scripts\ToUtf.ps1
+dotnet .\scripts\ToUtf.cs
 
 # UTF-8 -> native codepage
-.\scripts\FromUtf.ps1
+dotnet .\scripts\FromUtf.cs
 ```
 
 Convert selected files:
 
 ```powershell
-.\scripts\ToUtf.ps1 -Files SampleModule.bas,ThisWorkbook.cls
+dotnet .\scripts\ToUtf.cs -- --files SampleModule.bas,ThisWorkbook.cls
 ```
+
+Encoding helper options:
+
+- `--source`, `-s` - source directory (default: `./source`)
+- `--files`, `-f` - comma or semicolon-separated file names
+- `--help`, `-h` - show script help
 
 ## Configure for your project
 
-1. Replace `Sample.xlsm` with your workbook name (or pass explicit path in commands).
+1. Set your workbook path in `vba-dev-pack.json` field `workbook` (or pass explicit `--workbook` in commands).
 2. Keep your VBA modules in `source/` and Ribbon XML in `customUI/customUI.xml`.
-3. Replace `Sample.xlsm` defaults in all scripts so command runs can omit arguments:
-
-- `scripts/ExportVbaModules.cs`
-- `scripts/ImportVbaModules.cs`
-- `scripts/DiffVbaModules.cs`
-
-4. Set the codepage for your project in `vba-dev-pack.json` (default: `1251`):
+3. Set the codepage for your project in `vba-dev-pack.json` (default: `1251`):
 
 ```json
 {
-  "codepage": 1251
+	"workbook": "Sample.xlsm",
+	"codepage": 1251,
+	"backupRoot": "C:\\vba-dev-pack-backups"
 }
 ```
 
 The codepage is used when converting VBA text files between the native Excel encoding and UTF-8 during export, import, diff, and encoding helper operations. Set it to the Windows codepage that matches your locale (e.g. `1252` for Western European, `1251` for Cyrillic, `1250` for Central European).
 
-5. Set GitHub workflow variables/secrets used by `.github/workflows/notify-email.yml`:
+`workbook` is required unless you always pass `--workbook` explicitly.
+
+`backupRoot` is optional. If omitted, backups are created under `%TEMP%\vba-dev-pack-backups`.
+
+4. Set GitHub workflow variables/secrets used by `.github/workflows/notify-email.yml`:
 
 - Repository variable: `GMAIL_USER`
 - Repository variable: `NOTIFY_EMAIL`
@@ -144,8 +163,8 @@ gh variable set NOTIFY_EMAIL --body "team@company.com"
 gh secret set GMAIL_APP_PASSWORD --body "<gmail-app-password>"
 ```
 
-6. Update CI workbook naming in `.github/workflows/notify-email.yml` (copy/attachment step currently uses `Sample.xlsm`).
-7. Ensure your default branch matches workflow trigger (`master`) or update trigger branch.
+5. Update CI workbook naming in `.github/workflows/notify-email.yml` (copy/attachment step currently uses `Sample.xlsm`).
+6. Ensure your default branch matches workflow trigger (`master`) or update trigger branch.
 
 ## GitHub workflow behavior
 

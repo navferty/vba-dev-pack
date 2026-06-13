@@ -21,7 +21,7 @@ dotnet .\scripts\ExportVbaModules.cs
 dotnet .\scripts\ImportVbaModules.cs
 ```
 
-Export and import commands include an interactive HTML diff preview before confirmation.
+Export and import commands include an interactive HTML diff report for confirmation.
 
 ## Why use this template
 
@@ -104,8 +104,8 @@ dotnet .\scripts\DiffVbaModules.cs -- --direction import
 	- `dotnet .\scripts\DiffVbaModules.cs -- -d import` (repo -> workbook)
 3. Run apply command:
 	- `dotnet .\scripts\ExportVbaModules.cs` or `dotnet .\scripts\ImportVbaModules.cs`
-4. Review preflight HTML report.
-5. Confirm prompt: `Approve diff? [Y]es / [n]o (default: yes)`.
+4. If preflight finds changes, review HTML report and confirm: `Approve diff? [Y]es / [n]o (default: yes)`.
+5. If preflight finds no changes, command exits without opening report and without apply.
 6. Run diff again before commit.
 
 Apply flags:
@@ -120,6 +120,7 @@ Apply flags:
 - Import converts UTF-8 back to configured native codepage.
 - Import updates document modules (`ThisWorkbook`, sheet classes) in place.
 - `customUI/customUI.xml` is synced with workbook package part.
+- If preflight detects no changes, apply is skipped and report is not opened.
 - Apply commands create backups (default: `%TEMP%\vba-dev-pack-backups`).
 - Backup root is printed in output.
 
@@ -136,6 +137,24 @@ Apply only (`ExportVbaModules.cs`, `ImportVbaModules.cs`):
 
 - `4`: cancelled by user
 - `5`: non-interactive mode without `--force`
+
+## Recovery guide
+
+Backups are created before apply commands.
+
+- Default backup root: `%TEMP%\vba-dev-pack-backups`
+- If `backupRoot` is set in `vba-dev-pack.json`, that path is used instead.
+- Exact backup directory is always printed in command output as `Backup root: ...`.
+
+Quick restore:
+
+1. Close Excel workbook.
+2. Find latest backup folder under `export\<timestamp-guid>` or `import\<timestamp-guid>`.
+3. Restore needed artifacts:
+	- Workbook: copy from `workbook\<file>.xlsm` over your current workbook.
+	- VBA source: replace your `source\` with backup `source\`.
+	- Ribbon XML (if present): copy from `customUI\customUI.xml` to `customUI\customUI.xml`.
+4. Run `dotnet .\scripts\DiffVbaModules.cs` to verify state before next apply.
 
 ## Encoding helper scripts
 

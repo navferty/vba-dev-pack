@@ -60,7 +60,24 @@ var preflightExportDir = Path.Combine(Path.GetTempPath(), "vba-import-preflight-
 var preflightCustomUiPath = Path.Combine(preflightExportDir, "customUI.xml");
 var reportPath = Path.Combine(Path.GetTempPath(), $"vba-import-preflight-{DateTime.Now:yyyyMMdd-HHmmss}.html");
 
-if (!RunPreflight(workbookPath, sourceDir, customUiPath, nativeEncoding, preflightExportDir, preflightCustomUiPath, reportPath, options.NoOpenReport, options.Force))
+var preflightResult = RunPreflight(
+    workbookPath,
+    sourceDir,
+    customUiPath,
+    nativeEncoding,
+    preflightExportDir,
+    preflightCustomUiPath,
+    reportPath,
+    options.NoOpenReport,
+    options.Force);
+
+if (preflightResult == PreflightResult.NoChanges)
+{
+    Console.WriteLine("No changes detected for import. Nothing to apply.");
+    Environment.Exit(0);
+}
+
+if (preflightResult == PreflightResult.Cancelled)
 {
     Console.WriteLine("Import cancelled.");
     Environment.Exit(4);
@@ -355,7 +372,7 @@ static bool TryGetComponentByName(dynamic components, string name, out dynamic c
     }
 }
 
-static bool RunPreflight(
+static PreflightResult RunPreflight(
     string workbookPath,
     string sourceDir,
     string customUiPath,
@@ -393,7 +410,23 @@ static bool RunPreflight(
         VbaDiffEngine.ExportWorkbookModulesToTemp((dynamic)workbook!, tempExportDir, nativeEncoding);
 
         var compare = VbaDiffEngine.BuildComparison(sourceDir, tempExportDir, customUiPath, tempCustomUiPath, DiffDirection.Import);
-        var html = VbaDiffEngine.BuildHtmlReport(compare, workbookPath, sourceDir, tempExportDir, DiffDirection.Import);
+        var noChanges = compare.Changed.Count == 0
+            && compare.OnlyInSource.Count == 0
+            && compare.OnlyInExport.Count == 0;
+
+        if (noChanges)
+        {
+            Console.WriteLine(VbaDiffEngine.BuildConsoleSummary(compare, DiffDirection.Import));
+            return PreflightResult.NoChanges;
+        }
+
+        var html = VbaDiffEngine.BuildHtmlReport(
+            compare,
+            workbookPath,
+            sourceDir,
+            tempExportDir,
+            DiffDirection.Import,
+            "VBA Import Preflight Report");
         File.WriteAllText(reportPath, html, new UTF8Encoding(false));
 
         if (!noOpenReport)
@@ -404,19 +437,21 @@ static bool RunPreflight(
         Console.WriteLine($"Preflight report path: {reportPath}");
         Console.WriteLine(VbaDiffEngine.BuildConsoleSummary(compare, DiffDirection.Import));
 
-        return WorkbookPackageHelpers.EnsureApprovedOrExit(force);
+        return WorkbookPackageHelpers.EnsureApprovedOrExit(force)
+            ? PreflightResult.Proceed
+            : PreflightResult.Cancelled;
     }
     catch (COMException ex)
     {
         Console.Error.WriteLine(WorkbookPackageHelpers.BuildFriendlyComException(ex, "preflight import diff").Message);
         Environment.Exit(2);
-        return false;
+        return PreflightResult.Cancelled;
     }
     catch (Exception ex)
     {
         Console.Error.WriteLine(ex.Message);
         Environment.Exit(3);
-        return false;
+        return PreflightResult.Cancelled;
     }
     finally
     {
@@ -464,4 +499,11 @@ static bool RunPreflight(
             // No-op.
         }
     }
+}
+
+enum PreflightResult
+{
+    Proceed,
+    Cancelled,
+    NoChanges
 }

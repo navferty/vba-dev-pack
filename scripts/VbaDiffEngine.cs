@@ -144,14 +144,20 @@ static class VbaDiffEngine
         return result;
     }
 
-    public static string BuildHtmlReport(CompareResult compare, string workbookPath, string sourceDir, string exportDir, DiffDirection direction)
+    public static string BuildHtmlReport(
+        CompareResult compare,
+        string workbookPath,
+        string sourceDir,
+        string exportDir,
+        DiffDirection direction,
+        string reportTitle = "VBA Diff Report")
     {
         var sb = new StringBuilder();
         var (oldSide, newSide) = GetSideLabels(direction);
 
         sb.AppendLine("<!doctype html>");
         sb.AppendLine("<html><head><meta charset=\"utf-8\" />");
-        sb.AppendLine("<title>VBA Diff Report</title>");
+        sb.AppendLine($"<title>{Html(reportTitle)}</title>");
         sb.AppendLine("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css\" />");
         sb.AppendLine("<style>");
         sb.AppendLine("body{font-family:Segoe UI,Arial,sans-serif;margin:24px;background:#f7f9fc;color:#1e293b}");
@@ -171,7 +177,7 @@ static class VbaDiffEngine
         sb.AppendLine(".d2h-wrapper{border-top:1px solid #dbe4f0}");
         sb.AppendLine("</style></head><body>");
 
-        sb.AppendLine("<h1>VBA Diff Report</h1>");
+        sb.AppendLine($"<h1>{Html(reportTitle)}</h1>");
         sb.AppendLine("<div class=\"meta\">");
         sb.AppendLine($"<div><b>Workbook:</b> {Html(workbookPath)}</div>");
         sb.AppendLine($"<div><b>Source:</b> {Html(sourceDir)}</div>");

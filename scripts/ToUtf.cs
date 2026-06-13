@@ -29,7 +29,7 @@ if (!Directory.Exists(options.SourceDir))
 
 var nativeEncoding = WorkbookPackageHelpers.InitializeNativeEncoding(Environment.CurrentDirectory);
 var utf8NoBom = new UTF8Encoding(false);
-var filesToProcess = ResolveFiles(options);
+var filesToProcess = WorkbookPackageHelpers.ResolveEncodingFiles(options);
 
 foreach (var filePath in filesToProcess)
 {
@@ -43,43 +43,4 @@ foreach (var filePath in filesToProcess)
     var text = nativeEncoding.GetString(bytes);
     File.WriteAllText(filePath, text, utf8NoBom);
     Console.WriteLine($"Converted to UTF-8: {filePath}");
-}
-
-static List<string> ResolveFiles(EncodingScriptOptions options)
-{
-    var resolvedFiles = new List<string>();
-
-    if (options.Files.Count == 0)
-    {
-        resolvedFiles.AddRange(
-            Directory
-                .EnumerateFiles(options.SourceDir, "*.*", SearchOption.TopDirectoryOnly)
-                .Where(path => WorkbookPackageHelpers.IsSupportedConvertibleExtension(Path.GetExtension(path)))
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
-
-        return resolvedFiles;
-    }
-
-    foreach (var rawPath in options.Files)
-    {
-        var fullPath = Path.IsPathRooted(rawPath)
-            ? Path.GetFullPath(rawPath)
-            : Path.GetFullPath(Path.Combine(options.SourceDir, rawPath));
-
-        if (!File.Exists(fullPath))
-        {
-            Console.WriteLine($"Skipped, file not found: {fullPath}");
-            continue;
-        }
-
-        if (!WorkbookPackageHelpers.IsSupportedConvertibleExtension(Path.GetExtension(fullPath)))
-        {
-            Console.WriteLine($"Skipped, unsupported extension: {fullPath}");
-            continue;
-        }
-
-        resolvedFiles.Add(fullPath);
-    }
-
-    return resolvedFiles;
 }

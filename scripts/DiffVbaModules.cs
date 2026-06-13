@@ -8,16 +8,17 @@
 #:property EnableAotAnalyzer=false
 #:property BuiltInComInteropSupport=true
 #:include WorkbookPackageHelpers.cs
+#:include WorkbookSyncHelpers.cs
 #:include VbaDiffEngine.cs
 
 using System.Runtime.InteropServices;
 using System.Text;
 
 var config = WorkbookPackageHelpers.ReadConfig(Environment.CurrentDirectory);
-var options = WorkbookPackageHelpers.ParseDiffScriptOptions(args, config, Environment.CurrentDirectory);
+var options = WorkbookSyncHelpers.ParseDiffScriptOptions(args, config, Environment.CurrentDirectory);
 if (options.ShowHelp)
 {
-    Console.WriteLine(WorkbookPackageHelpers.BuildDiffHelp(config, Environment.CurrentDirectory));
+    Console.WriteLine(WorkbookSyncHelpers.BuildDiffHelp(config, Environment.CurrentDirectory));
     return;
 }
 

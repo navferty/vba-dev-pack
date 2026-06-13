@@ -327,6 +327,7 @@ static void UpdateDocumentModule(dynamic component, string sourcePath)
         if (!string.IsNullOrWhiteSpace(codeOnly))
         {
             codeModule.AddFromString(codeOnly);
+            RemoveSyntheticTrailingBlankLine(codeModule, codeOnly);
         }
     }
     finally
@@ -356,6 +357,46 @@ static string ExtractDocumentCode(string text)
     }
 
     return normalized;
+}
+
+static void RemoveSyntheticTrailingBlankLine(dynamic codeModule, string expectedCode)
+{
+    var expectedLines = NormalizeLineEndings(expectedCode).Split('\n', StringSplitOptions.None);
+    var actualLineCount = (int)codeModule.CountOfLines;
+    if (actualLineCount <= 0)
+    {
+        return;
+    }
+
+    var actualText = (string)codeModule.Lines(1, actualLineCount);
+    var actualLines = NormalizeLineEndings(actualText).Split('\n', StringSplitOptions.None);
+
+    // Excel may append exactly one synthetic trailing blank line in document modules.
+    // Remove it only when all preceding lines match expected content byte-for-byte.
+    if (actualLines.Length != expectedLines.Length + 1)
+    {
+        return;
+    }
+
+    if (actualLines[^1].Length != 0)
+    {
+        return;
+    }
+
+    for (var i = 0; i < expectedLines.Length; i++)
+    {
+        if (!string.Equals(actualLines[i], expectedLines[i], StringComparison.Ordinal))
+        {
+            return;
+        }
+    }
+
+    codeModule.DeleteLines(actualLineCount, 1);
+}
+
+static string NormalizeLineEndings(string text)
+{
+    return text.Replace("\r\n", "\n").Replace('\r', '\n');
 }
 
 static bool TryGetComponentByName(dynamic components, string name, out dynamic component)

@@ -85,7 +85,7 @@ static class VbaDiffEngine
             var sourceText = File.ReadAllText(sourcePath!, new UTF8Encoding(false, true));
             var exportText = File.ReadAllText(exportPath!, new UTF8Encoding(false, true));
 
-            if (NormalizeLineEndings(sourceText) == NormalizeLineEndings(exportText))
+            if (AreEquivalentModuleTexts(sourceText, exportText))
             {
                 result.Equal.Add(name);
                 continue;
@@ -544,6 +544,63 @@ static class VbaDiffEngine
     private static string[] SplitLines(string text)
     {
         return text.Split('\n');
+    }
+
+    private static bool AreEquivalentModuleTexts(string sourceText, string exportText)
+    {
+        var sourceNormalized = NormalizeLineEndings(sourceText);
+        var exportNormalized = NormalizeLineEndings(exportText);
+
+        if (sourceNormalized == exportNormalized)
+        {
+            return true;
+        }
+
+        // Excel can add one synthetic trailing blank line when round-tripping document modules.
+        // Ignore only that specific case, keep all other diffs visible.
+        if (!IsDocumentModuleText(sourceNormalized) && !IsDocumentModuleText(exportNormalized))
+        {
+            return false;
+        }
+
+        return DiffersBySingleTrailingBlankLine(sourceNormalized, exportNormalized);
+    }
+
+    private static bool IsDocumentModuleText(string text)
+    {
+        return text.Contains("Attribute VB_PredeclaredId = True", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool DiffersBySingleTrailingBlankLine(string first, string second)
+    {
+        var firstLines = first.Split('\n', StringSplitOptions.None);
+        var secondLines = second.Split('\n', StringSplitOptions.None);
+
+        return HasSingleTrailingBlankDelta(firstLines, secondLines)
+            || HasSingleTrailingBlankDelta(secondLines, firstLines);
+    }
+
+    private static bool HasSingleTrailingBlankDelta(string[] shorter, string[] longer)
+    {
+        if (longer.Length != shorter.Length + 1)
+        {
+            return false;
+        }
+
+        if (longer[^1].Length != 0)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < shorter.Length; i++)
+        {
+            if (!string.Equals(shorter[i], longer[i], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static string NormalizeLineEndings(string text)

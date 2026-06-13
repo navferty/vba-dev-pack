@@ -3,10 +3,14 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Xml.Linq;
 
 static class WorkbookPackageHelpers
 {
     private const string ConfigFileName = "vba-dev-pack.json";
+    private const string PackageRelationshipsPath = "_rels/.rels";
+    private const string UiExtensibilityRelationshipType = "http://schemas.microsoft.com/office/2006/relationships/ui/extensibility";
+    private static readonly XNamespace RelationshipNs = "http://schemas.openxmlformats.org/package/2006/relationships";
     private static readonly UTF8Encoding Utf8NoBom = new(false);
     private static readonly UTF8Encoding Utf8NoBomStrict = new(false, true);
     private static readonly HashSet<string> ConvertibleExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -182,10 +186,17 @@ Examples:
 
         existingPart?.Delete();
 
-        var entry = archive.CreateEntry(targetPartName, CompressionLevel.Optimal);
-        using var stream = entry.Open();
-        using var writer = new StreamWriter(stream, Utf8NoBom);
-        writer.Write(xmlText);
+        WriteArchiveEntryText(archive, targetPartName, xmlText);
+        var relsChange = EnsureCustomUiPackageReferences(archive, targetPartName);
+
+        if (relsChange.Added)
+        {
+            Console.WriteLine($"Added package rels entry for customUI: _rels/.rels ({relsChange.RelationshipId} -> {relsChange.Target})");
+        }
+        else if (relsChange.Updated)
+        {
+            Console.WriteLine($"Updated package rels entry for customUI: _rels/.rels ({relsChange.RelationshipId} -> {relsChange.Target})");
+        }
     }
 
     public static void EnsureWorkbookClosed(string workbookPath)
@@ -454,6 +465,135 @@ Examples:
 
         return null;
     }
+
+    private static PackageRelsChange EnsureCustomUiPackageReferences(ZipArchive archive, string partName)
+    {
+        var normalizedPartName = partName.Replace('\\', '/').TrimStart('/');
+        return EnsurePackageRelationship(archive, normalizedPartName);
+    }
+
+    private static PackageRelsChange EnsurePackageRelationship(ZipArchive archive, string targetPartName)
+    {
+        var relDoc = ReadXmlEntry(archive, PackageRelationshipsPath)
+            ?? throw new InvalidOperationException($"Workbook package is missing required part: {PackageRelationshipsPath}");
+
+        var root = relDoc.Root
+            ?? throw new InvalidOperationException($"Workbook package part is invalid: {PackageRelationshipsPath}");
+
+        var relationships = root.Elements(RelationshipNs + "Relationship").ToList();
+        var uiRelationships = relationships
+            .Where(x => string.Equals((string?)x.Attribute("Type"), UiExtensibilityRelationshipType, StringComparison.Ordinal))
+            .ToList();
+
+        if (uiRelationships.Count == 0)
+        {
+            var newId = BuildNextRelationshipId(relationships);
+            root.Add(new XElement(
+                RelationshipNs + "Relationship",
+                new XAttribute("Id", newId),
+                new XAttribute("Type", UiExtensibilityRelationshipType),
+                new XAttribute("Target", targetPartName)));
+
+            WriteXmlEntry(archive, PackageRelationshipsPath, relDoc);
+            return new PackageRelsChange(true, false, newId, targetPartName);
+        }
+
+        var primary = uiRelationships[0];
+        var changed = false;
+        var relationshipId = (string?)primary.Attribute("Id");
+        if (string.IsNullOrWhiteSpace(relationshipId))
+        {
+            relationshipId = BuildNextRelationshipId(relationships);
+            primary.SetAttributeValue("Id", relationshipId);
+            changed = true;
+        }
+
+        if (!string.Equals((string?)primary.Attribute("Type"), UiExtensibilityRelationshipType, StringComparison.Ordinal))
+        {
+            primary.SetAttributeValue("Type", UiExtensibilityRelationshipType);
+            changed = true;
+        }
+
+        if (!string.Equals((string?)primary.Attribute("Target"), targetPartName, StringComparison.Ordinal))
+        {
+            primary.SetAttributeValue("Target", targetPartName);
+            changed = true;
+        }
+
+        if (uiRelationships.Count > 1)
+        {
+            for (var i = 1; i < uiRelationships.Count; i++)
+            {
+                uiRelationships[i].Remove();
+            }
+
+            changed = true;
+        }
+
+        if (changed)
+        {
+            WriteXmlEntry(archive, PackageRelationshipsPath, relDoc);
+        }
+
+        return new PackageRelsChange(false, changed, relationshipId!, targetPartName);
+    }
+
+    private static string BuildNextRelationshipId(List<XElement> relationships)
+    {
+        var used = new HashSet<int>();
+        foreach (var rel in relationships)
+        {
+            var id = (string?)rel.Attribute("Id");
+            if (id is null || !id.StartsWith("rId", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (int.TryParse(id[3..], out var number) && number > 0)
+            {
+                used.Add(number);
+            }
+        }
+
+        var next = 1;
+        while (used.Contains(next))
+        {
+            next++;
+        }
+
+        return $"rId{next}";
+    }
+
+    private static XDocument? ReadXmlEntry(ZipArchive archive, string fullName)
+    {
+        var entry = archive.GetEntry(fullName);
+        if (entry is null)
+        {
+            return null;
+        }
+
+        using var stream = entry.Open();
+        using var reader = new StreamReader(stream, Utf8NoBomStrict);
+        var text = reader.ReadToEnd();
+        return XDocument.Parse(text, LoadOptions.PreserveWhitespace);
+    }
+
+    private static void WriteXmlEntry(ZipArchive archive, string fullName, XDocument document)
+    {
+        WriteArchiveEntryText(archive, fullName, document.ToString(SaveOptions.DisableFormatting));
+    }
+
+    private static void WriteArchiveEntryText(ZipArchive archive, string fullName, string text)
+    {
+        archive.GetEntry(fullName)?.Delete();
+
+        var entry = archive.CreateEntry(fullName, CompressionLevel.Optimal);
+        using var stream = entry.Open();
+        using var writer = new StreamWriter(stream, Utf8NoBom);
+        writer.Write(text);
+    }
+
+    private readonly record struct PackageRelsChange(bool Added, bool Updated, string RelationshipId, string Target);
 }
 
 sealed class EncodingScriptOptions

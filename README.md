@@ -4,6 +4,12 @@ Template repository for Excel XLSM + VBA development with source control.
 
 ## Quickstart
 
+First-time setup (once):
+
+1. Replace `Sample.xlsm` with your real workbook path in `vba-dev-pack.json` (`workbook`).
+2. Keep workbook closed before running scripts.
+3. Enable Excel setting: File -> Options -> Trust Center -> Trust Center Settings -> Macro Settings -> Trust access to the VBA project object model.
+
 ```powershell
 # 1) Compare workbook vs repository first (safety check)
 dotnet .\scripts\DiffVbaModules.cs
@@ -15,7 +21,7 @@ dotnet .\scripts\ExportVbaModules.cs
 dotnet .\scripts\ImportVbaModules.cs
 ```
 
-It is recommended to always run diff before import/export.
+Export and import commands include an interactive HTML diff preview before confirmation.
 
 ## Why use this template
 
@@ -90,37 +96,17 @@ dotnet .\scripts\DiffVbaModules.cs -- --direction export
 dotnet .\scripts\DiffVbaModules.cs -- --direction import
 ```
 
-## Daily development flow
+## Daily sync flow
 
 1. Pull latest changes.
-2. Run directional diff and choose source of truth.
-3. Run apply command (import or export).
-4. Review preflight report.
-5. Approve apply (`Enter` = yes by default).
-6. Run diff again before commit.
-
-Commands:
-
-```powershell
-# Import repo -> workbook
-dotnet .\scripts\ImportVbaModules.cs
-
-# Export workbook -> repo
-dotnet .\scripts\ExportVbaModules.cs
-
-# Open HTML comparison report
-dotnet .\scripts\DiffVbaModules.cs
-```
-
-## Final sync UX
-
-1. Preview with direction:
-	- `dotnet .\scripts\DiffVbaModules.cs -- -d export`
-	- `dotnet .\scripts\DiffVbaModules.cs -- -d import`
-2. Run apply command:
+2. Preview diff and choose source of truth:
+	- `dotnet .\scripts\DiffVbaModules.cs -- -d export` (workbook -> repo)
+	- `dotnet .\scripts\DiffVbaModules.cs -- -d import` (repo -> workbook)
+3. Run apply command:
 	- `dotnet .\scripts\ExportVbaModules.cs` or `dotnet .\scripts\ImportVbaModules.cs`
-3. Check preflight HTML report.
-4. Confirm prompt: `Approve diff? [Y]es / [n]o (default: yes)`.
+4. Review preflight HTML report.
+5. Confirm prompt: `Approve diff? [Y]es / [n]o (default: yes)`.
+6. Run diff again before commit.
 
 Apply flags:
 

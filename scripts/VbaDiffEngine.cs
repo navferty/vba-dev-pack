@@ -175,6 +175,7 @@ static class VbaDiffEngine
         sb.AppendLine("ul{margin:8px 0 0 20px}");
         sb.AppendLine("li{margin:4px 0}");
         sb.AppendLine(".d2h-wrapper{border-top:1px solid #dbe4f0}");
+        sb.AppendLine(".d2h-moved-tag{display:none}");
         sb.AppendLine("</style></head><body>");
 
         sb.AppendLine($"<h1>{Html(reportTitle)}</h1>");
